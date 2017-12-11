@@ -20,7 +20,10 @@
           (method-name : symbol)
           (arg-expr : ExprC)]
   [castC (type-name : symbol)
-         (arg-expr : ExprC)])
+         (arg-expr : ExprC)]
+  [if0C (tst : ExprC)
+        (thn : ExprC)
+        (els : ExprC)])
 
 (define-type ClassC
   [classC (name : symbol)
@@ -132,7 +135,11 @@
                    [numV (n)
                          (if (equal? type-name 'num)
                              arg
-                             (error 'interp "cast failed"))]))]))))
+                             (error 'interp "cast failed"))]))]
+        [if0C (tst thn els)
+              (if (num-zero? (recur tst))
+                  (recur thn)
+                  (recur els))]))))
 
 (define (is-instance [class-name : symbol] [ancestor-name : symbol] [classes : (listof ClassC)]) : boolean
   (cond
@@ -164,6 +171,10 @@
 
 (define (num+ x y) (num-op + '+ x y))
 (define (num* x y) (num-op * '* x y))
+(define (num-zero? x)
+  (cond
+    [(numV? x) (equal? (numV-n x) 0)]
+    [else (error 'interp "not a number")]))
 
 ;; ----------------------------------------
 ;; Examples
@@ -252,4 +263,12 @@
   (test/exn (interp-posn (castC 'posn3D posn27))
             "cast failed")
   (test/exn (interp-posn (castC 'object (numC 1)))
-            "cast failed"))
+            "cast failed")
+
+  ; if0C
+  (test (interp-posn (if0C (numC 0) (numC 2) (numC 3)))
+        (numV 2))
+  (test (interp-posn (if0C (numC 1) (numC 2) (numC 3)))
+        (numV 3))
+  (test/exn (interp-posn (if0C posn27 (numC 2) (numC 3)))
+            "not a number"))

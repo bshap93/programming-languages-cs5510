@@ -22,7 +22,7 @@
 (define-type Type
   [numT]
   [objT (class-name : symbol)]
-  [unsetT])
+  [nullT])
 
 (module+ test
   (print-only-errors true))
@@ -137,10 +137,10 @@
         [plusI (l r) (typecheck-nums l r)]
         [multI (l r) (typecheck-nums l r)]
         [argI () (type-case Type arg-type ; main expression `this` and `arg` are not allowed
-                   [unsetT () (error 'typecheck "arg not bound")]
+                   [nullT () (error 'typecheck "arg not bound")]
                    [else arg-type])]
         [thisI () (type-case Type this-type
-                    [unsetT () (error 'typecheck "this not bound")]
+                    [nullT () (error 'typecheck "this not bound")]
                     [else this-type])]
         [newI (class-name exprs)
               (local [(define arg-types (map recur exprs))
@@ -192,7 +192,29 @@
                  (if (or (is-subtype? arg-type sym-type t-classes)
                          (is-subtype? sym-type arg-type t-classes))
                      sym-type
-                     (error 'typecheck "impossible cast")))]))))
+                     (error 'typecheck "impossible cast")))]
+        [if0I (tst thn els)
+              (type-case Type (recur tst)
+                [numT () (least-upper-bound (recur thn) (recur els) t-classes)]
+                [else (type-error tst "num")])]))))
+
+(define (least-upper-bound type-a type-b t-classes)
+  (type-case Type type-a
+    [objT (a-class-name)
+          (type-case Type type-b
+            [objT (b-class-name)
+                  (least-common-superclass a-class-name b-class-name t-classes)]
+            [else (type-error type-a (to-string type-b))])]
+    [else (if (equal? type-a type-b)
+              type-a
+              (type-error type-a (to-string type-b)))]))
+
+(define (least-common-superclass name-a name-b t-classes) ; not terribly efficient right now but gets the job done
+  (if (is-subclass? name-a name-b t-classes)
+      (objT name-b)
+      (type-case ClassT (find-classT name-b t-classes)
+        [classT (name super-name fields methods)
+                (least-common-superclass name-a super-name t-classes)])))
 
 (define (typecheck-send [class-name : symbol]
                         [method-name : symbol]
@@ -256,7 +278,7 @@
     (map (lambda (t-class)
            (typecheck-class t-class t-classes))
          t-classes)
-    (typecheck-expr a t-classes (unsetT) (unsetT))))
+    (typecheck-expr a t-classes (nullT) (nullT))))
 
 ;; ----------------------------------------
 
@@ -277,6 +299,13 @@
                            (plusI (getI (thisI) 'z) 
                                   (superI 'mdist (argI)))))))
 
+  (define posn3D2-t-class 
+    (classT 'posn3D2 'posn
+            (list (fieldT 'w (numT)))
+            (list (methodT 'mdist (numT) (numT)
+                           (plusI (getI (thisI) 'w) 
+                                  (superI 'mdist (argI)))))))
+
   (define square-t-class 
     (classT 'square 'object
             (list (fieldT 'topleft (objT 'posn)))
@@ -284,10 +313,11 @@
 
   (define (typecheck-posn a)
     (typecheck a
-               (list posn-t-class posn3D-t-class square-t-class)))
+               (list posn-t-class posn3D-t-class posn3D2-t-class square-t-class)))
   
   (define posn27 (newI 'posn (list (numI 2) (numI 7))))
   (define posn531 (newI 'posn3D (list (numI 5) (numI 3) (numI 1))))
+  (define posn135 (newI 'posn3D2 (list (numI 1) (numI 3) (numI 5))))
   (define square-posn27 (newI 'square (list posn27)))
 
   (define reflector-t-class
@@ -352,7 +382,7 @@
                                                (superI 'm (numI 0)))))))
             "not found")
 
-  ; Test that the typechecker disallows unset `this` and `arg`
+  ; Test that the typechecker disallows use of null `this` and `arg`
   (test (typecheck (sendI (newI 'reflector (list)) 'arg (numI 22)) (list reflector-t-class))
         (numT))
   (test (typecheck (sendI (newI 'reflector (list)) 'this (numI 0)) (list reflector-t-class))
@@ -376,7 +406,25 @@
   (test/exn (typecheck-posn (castI 'posn square-posn27))
             "impossible cast")
   (test/exn (typecheck (castI 'object (numI 1)) (list))
-            "impossible cast"))
+            "impossible cast")
+
+  ; Test if0
+  (test (typecheck (if0I (numI 0) (numI 1) (numI 2)) (list))
+        (numT))
+  (test (typecheck-posn (if0I (numI 0) posn27 posn27))
+        (objT 'posn))
+  (test (typecheck-posn (if0I (numI 0) posn531 posn27))
+        (objT 'posn))
+  (test (typecheck-posn (if0I (numI 0) posn27 square-posn27))
+        (objT 'object))
+  (test (typecheck-posn (if0I (numI 0) posn531 posn135))
+        (objT 'posn))
+  (test/exn (typecheck-posn (if0I posn27 (numI 1) (numI 2)))
+            "no type")
+  (test/exn (typecheck-posn (if0I (numI 0) posn27 (numI 1)))
+            "no type")
+  (test/exn (typecheck-posn (if0I (numI 0) (numI 1) posn27))
+            "no type"))
 
 ;; ----------------------------------------
 

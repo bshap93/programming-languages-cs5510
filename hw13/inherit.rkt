@@ -23,7 +23,10 @@
   [superI (method-name : symbol)
           (arg-expr : ExprI)]
   [castI (type-name : symbol)
-         (arg-expr : ExprI)])
+         (arg-expr : ExprI)]
+  [if0I (tst : ExprI)
+        (thn : ExprI)
+        (els : ExprI)])
 
 (define-type ClassI
   [classI (name : symbol)
@@ -64,7 +67,11 @@
                       (recur arg-expr))]
       [castI (type-name arg-expr)
              (castC type-name
-                    (recur arg-expr))])))
+                    (recur arg-expr))]
+      [if0I (tst thn els)
+            (if0C (recur tst)
+                  (recur thn)
+                  (recur els))])))
 
 (module+ test
   (test (expr-i->c (numI 10) 'object)
@@ -86,7 +93,9 @@
   (test (expr-i->c (superI 'mdist (numI 2)) 'posn)
         (ssendC (thisC) 'posn 'mdist (numC 2)))
   (test (expr-i->c (castI 'object (numI 1)) 'object)
-        (castC 'object (numC 1))))
+        (castC 'object (numC 1)))
+  (test (expr-i->c (if0I (numI 0) (numI 1) (numI 2)) 'object)
+        (if0C (numC 0) (numC 1) (numC 2))))
 
 ;; ----------------------------------------
 

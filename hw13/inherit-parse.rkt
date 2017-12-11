@@ -59,6 +59,10 @@
    [(s-exp-match? '{cast SYMBOL ANY} s)
     (castI (s-exp->symbol (second (s-exp->list s)))
            (parse (third (s-exp->list s))))]
+   [(s-exp-match? '{if ANY ANY ANY} s)
+    (if0I (parse (second (s-exp->list s)))
+          (parse (third (s-exp->list s)))
+          (parse (fourth (s-exp->list s))))]
    [else (error 'parse "invalid input")]))
 
 (module+ test
@@ -82,6 +86,8 @@
         (superI 'm (numI 1)))
   (test (parse '{cast m 1})
         (castI 'm (numI 1)))
+  (test (parse '{if 0 1 2})
+        (if0I (numI 0) (numI 1) (numI 2)))
   (test/exn (parse `x)
             "invalid input")
 
