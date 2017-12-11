@@ -23,7 +23,8 @@
          (arg-expr : ExprC)]
   [if0C (tst : ExprC)
         (thn : ExprC)
-        (els : ExprC)])
+        (els : ExprC)]
+  [nullC])
 
 (define-type ClassC
   [classC (name : symbol)
@@ -38,7 +39,8 @@
 (define-type Value
   [numV (n : number)]
   [objV (class-name : symbol)
-        (field-values : (listof Value))])
+        (field-values : (listof Value))]
+  [nullV])
 
 (module+ test
   (print-only-errors true))
@@ -135,11 +137,13 @@
                    [numV (n)
                          (if (equal? type-name 'num)
                              arg
-                             (error 'interp "cast failed"))]))]
+                             (error 'interp "cast failed"))]
+                   [nullV () arg]))] ; null is considered a valid instance of any type
         [if0C (tst thn els)
               (if (num-zero? (recur tst))
                   (recur thn)
-                  (recur els))]))))
+                  (recur els))]
+        [nullC () (nullV)]))))
 
 (define (is-instance [class-name : symbol] [ancestor-name : symbol] [classes : (listof ClassC)]) : boolean
   (cond
@@ -271,4 +275,18 @@
   (test (interp-posn (if0C (numC 1) (numC 2) (numC 3)))
         (numV 3))
   (test/exn (interp-posn (if0C posn27 (numC 2) (numC 3)))
-            "not a number"))
+            "not a number")
+
+  ; nullC
+  (test (interp-posn (nullC))
+        (nullV))
+  (test (interp-posn (newC 'posn (list (nullC) (nullC))))
+        (objV 'posn (list (nullV) (nullV))))
+  (test (interp-posn (sendC posn27 'mdist (nullC)))
+        (numV 9))
+  (test (interp-posn (castC 'posn (nullC)))
+        (nullV))
+  (test/exn (interp-posn (sendC (castC 'posn (nullC)) 'mdist (numC 0)))
+            "not an object")
+  (test/exn (interp-posn (getC (castC 'posn (nullC)) 'x))
+            "not an object"))

@@ -22,7 +22,8 @@
 (define-type Type
   [numT]
   [objT (class-name : symbol)]
-  [nullT])
+  [unsetT]
+  [nullT]) ; necessary distinction from unsetT -- this and arg must be prohibited in main expression
 
 (module+ test
   (print-only-errors true))
@@ -94,7 +95,8 @@
           (type-case Type t2 
             [objT (name2)
                   (is-subclass? name1 name2 t-classes)]
-            [else false])]
+            [else false])] ; no object is a subtype of null
+    [nullT () (or (objT? t2) (equal? t1 t2))] ; null is a subtype of every object, and itself
     [else (equal? t1 t2)]))
 
 (module+ test
@@ -117,7 +119,13 @@
   (test (is-subtype? (objT 'a) (objT 'b) (list a-t-class b-t-class))
         false)
   (test (is-subtype? (objT 'b) (objT 'a) (list a-t-class b-t-class))
-        true))
+        true)
+  (test (is-subtype? (nullT) (objT 'a) (list a-t-class))
+        true)
+  (test (is-subtype? (nullT) (nullT) empty)
+        true)
+  (test (is-subtype? (objT 'a) (nullT) (list a-t-class))
+        false))
 
 ;; ----------------------------------------
 
@@ -137,10 +145,10 @@
         [plusI (l r) (typecheck-nums l r)]
         [multI (l r) (typecheck-nums l r)]
         [argI () (type-case Type arg-type ; main expression `this` and `arg` are not allowed
-                   [nullT () (error 'typecheck "arg not bound")]
+                   [unsetT () (error 'typecheck "arg not bound")]
                    [else arg-type])]
         [thisI () (type-case Type this-type
-                    [nullT () (error 'typecheck "this not bound")]
+                    [unsetT () (error 'typecheck "this not bound")]
                     [else this-type])]
         [newI (class-name exprs)
               (local [(define arg-types (map recur exprs))
@@ -196,7 +204,8 @@
         [if0I (tst thn els)
               (type-case Type (recur tst)
                 [numT () (least-upper-bound (recur thn) (recur els) t-classes)]
-                [else (type-error tst "num")])]))))
+                [else (type-error tst "num")])]
+        [nullI () (nullT)]))))
 
 (define (least-upper-bound type-a type-b t-classes)
   (type-case Type type-a
@@ -204,7 +213,11 @@
           (type-case Type type-b
             [objT (b-class-name)
                   (least-common-superclass a-class-name b-class-name t-classes)]
+            [nullT () type-a]
             [else (type-error type-a (to-string type-b))])]
+    [nullT () (if (or (objT? type-b) (equal? type-a type-b)) ; null is upper-bounded by any object, or null
+                  type-b
+                  (type-error type-a (to-string type-b)))]
     [else (if (equal? type-a type-b)
               type-a
               (type-error type-a (to-string type-b)))]))
@@ -278,7 +291,7 @@
     (map (lambda (t-class)
            (typecheck-class t-class t-classes))
          t-classes)
-    (typecheck-expr a t-classes (nullT) (nullT))))
+    (typecheck-expr a t-classes (unsetT) (unsetT))))
 
 ;; ----------------------------------------
 
@@ -309,7 +322,8 @@
   (define square-t-class 
     (classT 'square 'object
             (list (fieldT 'topleft (objT 'posn)))
-            (list)))
+            (list (methodT 'dup (objT 'posn) (objT 'square)
+                           (newI 'square (list (getI (thisI) 'topleft)))))))
 
   (define (typecheck-posn a)
     (typecheck a
@@ -382,7 +396,7 @@
                                                (superI 'm (numI 0)))))))
             "not found")
 
-  ; Test that the typechecker disallows use of null `this` and `arg`
+  ; Test that the typechecker disallows use of unset `this` and `arg`
   (test (typecheck (sendI (newI 'reflector (list)) 'arg (numI 22)) (list reflector-t-class))
         (numT))
   (test (typecheck (sendI (newI 'reflector (list)) 'this (numI 0)) (list reflector-t-class))
@@ -424,7 +438,27 @@
   (test/exn (typecheck-posn (if0I (numI 0) posn27 (numI 1)))
             "no type")
   (test/exn (typecheck-posn (if0I (numI 0) (numI 1) posn27))
-            "no type"))
+            "no type")
+
+  ; Test null
+  (test (typecheck-posn (if0I (numI 0) (nullI) posn27)) ; null + if0
+        (objT 'posn))
+  (test (typecheck-posn (if0I (numI 0) (nullI) (nullI)))
+        (nullT))
+  (test (typecheck-posn (if0I (numI 0) posn27 (nullI)))
+        (objT 'posn))
+  (test/exn (typecheck (if0I (numI 0) (nullI) (numI 1)) (list))
+        "no type")
+  
+  (test/exn (typecheck-posn (getI (nullI) 'x)) ; null get and send
+            "no type")
+  (test/exn (typecheck-posn (sendI (nullI) 'm (numI 0)))
+            "no type")
+
+  (test (typecheck-posn (newI 'square (list (nullI)))) ; unused null field value and arg value
+        (objT 'square))
+  (test (typecheck-posn (sendI (newI 'square (list (nullI))) 'dup (nullI)))
+        (objT 'square)))
 
 ;; ----------------------------------------
 

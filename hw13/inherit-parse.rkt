@@ -37,6 +37,7 @@
    [(s-exp-match? `NUMBER s) (numI (s-exp->number s))]
    [(s-exp-match? `arg s) (argI)]
    [(s-exp-match? `this s) (thisI)]
+   [(s-exp-match? `null s) (nullI)]
    [(s-exp-match? '{+ ANY ANY} s)
     (plusI (parse (second (s-exp->list s)))
            (parse (third (s-exp->list s))))]
@@ -59,7 +60,7 @@
    [(s-exp-match? '{cast SYMBOL ANY} s)
     (castI (s-exp->symbol (second (s-exp->list s)))
            (parse (third (s-exp->list s))))]
-   [(s-exp-match? '{if ANY ANY ANY} s)
+   [(s-exp-match? '{if0 ANY ANY ANY} s)
     (if0I (parse (second (s-exp->list s)))
           (parse (third (s-exp->list s)))
           (parse (fourth (s-exp->list s))))]
@@ -86,8 +87,10 @@
         (superI 'm (numI 1)))
   (test (parse '{cast m 1})
         (castI 'm (numI 1)))
-  (test (parse '{if 0 1 2})
+  (test (parse '{if0 0 1 2})
         (if0I (numI 0) (numI 1) (numI 2)))
+  (test (parse `null)
+        (nullI))
   (test/exn (parse `x)
             "invalid input")
 
@@ -119,7 +122,8 @@
                      (map parse-class classes))])
     (type-case Value v
       [numV (n) (number->s-exp n)]
-      [objV (class-name field-vals) `object])))
+      [objV (class-name field-vals) `object]
+      [nullV () `null])))
 
 (module+ test
   (test (interp-prog
@@ -143,5 +147,18 @@
                            {super mdist arg}}}})
         
         '{send {new posn3D 5 3 1} addDist {new posn 2 7}})
-       '18))
+       '18)
+
+  (test (interp-prog
+         (list
+          '{class posn extends object
+                 {x y}
+                 {mdist {+ {get this x} {get this y}}}
+                 {addDist {+ {send arg mdist 0}
+                             {send this mdist 0}}}})
+
+         '{if0 {+ {send {cast posn {new posn 2 7}} mdist null} -9}
+               null
+               1})
+        `null))
 
