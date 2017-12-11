@@ -18,10 +18,13 @@
   [ssendC (obj-expr : ExprC)
           (class-name : symbol)
           (method-name : symbol)
-          (arg-expr : ExprC)])
+          (arg-expr : ExprC)]
+  [castC (type-name : symbol)
+         (arg-expr : ExprC)])
 
 (define-type ClassC
   [classC (name : symbol)
+          (super-name : symbol)
           (field-names : (listof symbol))
           (methods : (listof MethodC))])
 
@@ -70,11 +73,11 @@
 (module+ test
   (test/exn (find-class 'a empty)
             "not found")
-  (test (find-class 'a (list (classC 'a empty empty)))
-        (classC 'a empty empty))
-  (test (find-class 'b (list (classC 'a empty empty)
-                             (classC 'b empty empty)))
-        (classC 'b empty empty))
+  (test (find-class 'a (list (classC 'a 'object empty empty)))
+        (classC 'a 'object empty empty))
+  (test (find-class 'b (list (classC 'a 'object empty empty)
+                             (classC 'b 'object empty empty)))
+        (classC 'b 'object empty empty))
   (test (get-field 'a 
                    (list 'a 'b)
                    (list (numV 0) (numV 1)))
@@ -102,7 +105,7 @@
               (type-case Value (recur obj-expr)
                 [objV (class-name field-vals)
                       (type-case ClassC (find-class class-name classes)
-                        [classC (name field-names methods)
+                        [classC (name super-name field-names methods)
                                 (get-field field-name field-names 
                                            field-vals)])]
                 [else (error 'interp "not an object")])]
@@ -118,12 +121,31 @@
                 (local [(define obj (recur obj-expr))
                         (define arg-val (recur arg-expr))]
                   (call-method class-name method-name classes
-                               obj arg-val))]))))
+                               obj arg-val))]
+        [castC (type-name arg-expr)
+               (local [(define arg (recur arg-expr))]
+                 (type-case Value arg
+                   [objV (class-name field-vals)
+                         (if (is-instance class-name type-name classes)
+                             arg
+                             (error 'interp "cast failed"))]
+                   [numV (n)
+                         (if (equal? type-name 'num)
+                             arg
+                             (error 'interp "cast failed"))]))]))))
+
+(define (is-instance [class-name : symbol] [ancestor-name : symbol] [classes : (listof ClassC)]) : boolean
+  (cond
+    [(equal? class-name ancestor-name) #t]
+    [(equal? class-name 'object) #f]
+    [else (type-case ClassC (find-class class-name classes)
+            [classC (name super-name field-names methods)
+                    (is-instance super-name ancestor-name classes)])]))
 
 (define (call-method class-name method-name classes
                      obj arg-val)
   (type-case ClassC (find-class class-name classes)
-    [classC (name field-names methods)
+    [classC (name super-name field-names methods)
             (type-case MethodC (find-method method-name methods)
               [methodC (name body-expr)
                        (interp body-expr
@@ -150,6 +172,7 @@
   (define posn-class
     (classC 
      'posn
+     'object
      (list 'x 'y)
      (list (methodC 'mdist
                     (plusC (getC (thisC) 'x) (getC (thisC) 'y)))
@@ -164,6 +187,7 @@
   (define posn3D-class
     (classC 
      'posn3D
+     'posn
      (list 'x 'y 'z)
      (list (methodC 'mdist (plusC (getC (thisC) 'z)
                                   (ssendC (thisC) 'posn 'mdist (argC))))
@@ -214,4 +238,18 @@
   (test/exn (interp-posn (ssendC (numC 1) 'posn 'mdist (numC 0)))
             "not an object")
   (test/exn (interp-posn (newC 'posn (list (numC 0))))
-            "wrong field count"))
+            "wrong field count")
+
+  ; castC
+  (test (interp-posn (castC 'posn posn27))
+        (objV 'posn (list (numV 2) (numV 7))))
+  (test (interp-posn (castC 'posn posn531))
+        (objV 'posn3D (list (numV 5) (numV 3) (numV 1))))
+  (test (interp-posn (castC 'object posn531))
+        (objV 'posn3D (list (numV 5) (numV 3) (numV 1))))
+  (test (interp-posn (castC 'num (numC 1)))
+        (numV 1))
+  (test/exn (interp-posn (castC 'posn3D posn27))
+            "cast failed")
+  (test/exn (interp-posn (castC 'object (numC 1)))
+            "cast failed"))

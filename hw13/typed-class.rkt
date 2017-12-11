@@ -137,10 +137,10 @@
         [plusI (l r) (typecheck-nums l r)]
         [multI (l r) (typecheck-nums l r)]
         [argI () (type-case Type arg-type ; main expression `this` and `arg` are not allowed
-                   [unsetT () (type-error arg-type "bound")]
+                   [unsetT () (error 'typecheck "arg not bound")]
                    [else arg-type])]
         [thisI () (type-case Type this-type
-                    [unsetT () (type-error this-type "bound")]
+                    [unsetT () (error 'typecheck "this not bound")]
                     [else this-type])]
         [newI (class-name exprs)
               (local [(define arg-types (map recur exprs))
@@ -179,13 +179,20 @@
                     (type-error obj-expr "object")]))]
         [superI (method-name arg-expr)
                 (local [(define arg-type (recur arg-expr))
-                        (define this-class
-                          (find-classT (objT-class-name this-type)
-                                       t-classes))]
+                        (define this-class (type-case Type this-type
+                                             [objT (class-name) (find-classT class-name t-classes)]
+                                             [else (error 'typecheck "this not bound")]))]
                   (typecheck-send (classT-super-name this-class)
                                   method-name
                                   arg-expr arg-type
-                                  t-classes))]))))
+                                  t-classes))]
+        [castI (type-name arg-expr)
+               (local [(define arg-type (recur arg-expr))
+                       (define sym-type (if (equal? type-name 'num) (numT) (objT type-name)))]
+                 (if (or (is-subtype? arg-type sym-type t-classes)
+                         (is-subtype? sym-type arg-type t-classes))
+                     sym-type
+                     (error 'typecheck "impossible cast")))]))))
 
 (define (typecheck-send [class-name : symbol]
                         [method-name : symbol]
@@ -281,6 +288,7 @@
   
   (define posn27 (newI 'posn (list (numI 2) (numI 7))))
   (define posn531 (newI 'posn3D (list (numI 5) (numI 3) (numI 1))))
+  (define square-posn27 (newI 'square (list posn27)))
 
   (define reflector-t-class
     (classT 'reflector 'object
@@ -344,15 +352,31 @@
                                                (superI 'm (numI 0)))))))
             "not found")
 
-  ; Test `this` and `arg` are disallowed outside of a context
+  ; Test that the typechecker disallows unset `this` and `arg`
   (test (typecheck (sendI (newI 'reflector (list)) 'arg (numI 22)) (list reflector-t-class))
         (numT))
   (test (typecheck (sendI (newI 'reflector (list)) 'this (numI 0)) (list reflector-t-class))
         (objT 'reflector))
+  (test/exn (typecheck (sendI (newI 'reflector (list)) 'arg (argI)) (list reflector-t-class))
+            "arg not bound")
   (test/exn (typecheck (thisI) (list))
-            "no type")
+            "this not bound")
   (test/exn (typecheck (argI) (list))
-            "no type"))
+            "arg not bound")
+  (test/exn (typecheck (superI 'method (numI 0)) (list))
+            "this not bound")
+
+  ; Test cast
+  (test (typecheck-posn (castI 'object posn27))
+        (objT 'object))
+  (test (typecheck-posn (castI 'posn3D posn27))
+        (objT 'posn3D))
+  (test (typecheck (castI 'num (numI 1)) (list))
+        (numT))
+  (test/exn (typecheck-posn (castI 'posn square-posn27))
+            "impossible cast")
+  (test/exn (typecheck (castI 'object (numI 1)) (list))
+            "impossible cast"))
 
 ;; ----------------------------------------
 
