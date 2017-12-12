@@ -13,8 +13,7 @@
          (rhs : ExprI)]
   [argI]
   [thisI]
-  [newI (class-name : symbol)
-        (args : (listof ExprI))]
+  [newI (class-name : symbol)]
   [getI (obj-expr : ExprI)
         (field-name : symbol)]
   [setI (obj-expr : ExprI)
@@ -35,7 +34,7 @@
 (define-type ClassI
   [classI (name : symbol)
           (super-name : symbol)
-          (field-names : (listof symbol))
+          (fields : (listof FieldC)) ; no change at this level, so FieldC is reused
           (methods : (listof MethodI))])
 
 (define-type MethodI
@@ -56,8 +55,8 @@
       [multI (l r) (multC (recur l) (recur r))]
       [argI () (argC)]
       [thisI () (thisC)]
-      [newI (class-name field-exprs)
-            (newC class-name (map recur field-exprs))]
+      [newI (class-name)
+            (newC class-name)]
       [getI (expr field-name)
             (getC (recur expr) field-name)]
       [setI (expr field-name arg-expr)
@@ -91,8 +90,8 @@
         (argC))
   (test (expr-i->c (thisI) 'object)
         (thisC))
-  (test (expr-i->c (newI 'object (list (numI 1))) 'object)
-        (newC 'object (list (numC 1))))
+  (test (expr-i->c (newI 'object) 'object)
+        (newC 'object))
   (test (expr-i->c (getI (numI 1) 'x) 'object)
         (getC (numC 1) 'x))
   (test (expr-i->c (setI (nullI) 'x (numI 1)) 'object)
@@ -133,11 +132,11 @@
 
 (define (class-i->c-not-flat [c : ClassI]) : ClassC
   (type-case ClassI c
-    [classI (name super-name field-names methods)
+    [classI (name super-name fields methods)
             (classC
              name
              super-name
-             field-names
+             fields
              (map (lambda (m) (method-i->c m super-name))
                   methods))]))
 
@@ -145,12 +144,12 @@
   (define posn3d-i-class 
     (classI 'posn3d
             'posn
-            (list 'z)
+            (list (fieldC 'z (numBT)))
             (list posn3d-mdist-i-method)))
   (define posn3d-c-class-not-flat
     (classC 'posn3d
             'posn
-            (list 'z)
+            (list (fieldC 'z (numBT)))
             (list posn3d-mdist-c-method)))
   
   (test (class-i->c-not-flat posn3d-i-class)
@@ -162,20 +161,20 @@
                        [classes : (listof ClassC)] 
                        [i-classes : (listof ClassI)]) : ClassC
   (type-case ClassC c
-    [classC (name s-name field-names methods)
+    [classC (name s-name fields methods)
             (type-case ClassC (flatten-super name classes i-classes)
-              [classC (super-name s-s-name super-field-names super-methods)
+              [classC (super-name s-s-name super-fields super-methods)
                       (classC
                        name
                        super-name
-                       (add-fields super-field-names field-names)
+                       (add-fields super-fields fields)
                        (add/replace-methods super-methods methods))])]))
 
 (define (flatten-super [name : symbol]
                        [classes : (listof ClassC)] 
                        [i-classes : (listof ClassI)]) : ClassC
   (type-case ClassI (find-i-class name i-classes)
-    [classI (name super-name field-names i-methods)
+    [classI (name super-name fields i-methods)
             (if (equal? super-name 'object)
                 (classC 'object 'object empty empty)
                 (flatten-class (find-class super-name classes)
@@ -186,7 +185,8 @@
   (define posn-i-class 
     (classI 'posn
             'object
-            (list 'x 'y)
+            (list (fieldC 'x (numBT))
+                  (fieldC 'y (numBT)))
             (list (methodI 'mdist
                            (plusI (getI (thisI) 'x)
                                   (getI (thisI) 'y)))
@@ -200,7 +200,8 @@
   (define posn-c-class-not-flat
     (classC 'posn
             'object
-            (list 'x 'y)
+            (list (fieldC 'x (numBT))
+                  (fieldC 'y (numBT)))
             (list (methodC 'mdist
                            (plusC (getC (thisC) 'x)
                                   (getC (thisC) 'y)))
@@ -208,7 +209,9 @@
   (define posn3d-c-class
     (classC 'posn3d
             'posn
-            (list 'x 'y 'z)
+            (list (fieldC 'x (numBT))
+                  (fieldC 'y (numBT))
+                  (fieldC 'z (numBT)))
             (list posn3d-mdist-c-method
                   addDist-c-method)))
 
@@ -246,8 +249,8 @@
                                    new-method)))]))
 
 (module+ test
-  (test (add-fields (list 'x 'y) (list 'z))
-        (list 'x 'y 'z))
+  (test (add-fields (list (fieldC 'x (numBT)) (fieldC 'y (numBT))) (list (fieldC 'z (numBT))))
+        (list (fieldC 'x (numBT)) (fieldC 'y (numBT)) (fieldC 'z (numBT))))
 
   (test (add/replace-methods empty empty)
         empty)
@@ -298,9 +301,9 @@
         (numV 0))
 
   (test (interp-i
-         (sendI (newI 'posn3d (list (numI 5) (numI 3) (numI 1)))
+         (sendI (setI (setI (setI (newI 'posn3d) 'x (numI 5)) 'y (numI 3)) 'z (numI 1))
                 'addDist
-                (newI 'posn (list (numI 2) (numI 7))))
+                (setI (setI (newI 'posn) 'x (numI 2)) 'y (numI 7)))
          (list posn-i-class
                posn3d-i-class))
         (numV 18)))

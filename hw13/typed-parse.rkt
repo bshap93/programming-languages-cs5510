@@ -110,7 +110,7 @@
                         {+ {get this z} 
                            {super mdist arg}}}})
         
-        '{send {new posn3D 5 3 1} addDist {new posn 2 7}})
+        '{send {set {set {set {new posn3D} x 5} y 3} z 1} addDist {set {set {new posn} x 2} y 7}})
        '18)
 
   (test (interp-t-prog
@@ -130,7 +130,7 @@
                         {+ {get this z} 
                            {super mdist arg}}}})
 
-         '{if0 {+ {send {cast posn {new posn3D 5 3 1}} mdist null} -9}
+         '{if0 {+ {send {cast posn {set {set {set {new posn3D} x 5} y 3} z 1}} mdist null} -9}
                null
-               {new posn 2 2}})
+               {set {set {new posn} x 2} y 2}})
         `null))

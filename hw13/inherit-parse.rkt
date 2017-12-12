@@ -19,10 +19,11 @@
                  (rest (rest (rest (rest (rest (s-exp->list s))))))))]
    [else (error 'parse-class "invalid input")]))
 
-(define (parse-field [s : s-expression]) : symbol
+(define (parse-field [s : s-expression]) : FieldC
   (cond
-   [(s-exp-match? `SYMBOL s)
-    (s-exp->symbol s)]
+   [(s-exp-match? '[SYMBOL : ANY] s)
+    (fieldC (s-exp->symbol (first (s-exp->list s)))
+            (parse-basetype (third (s-exp->list s))))]
    [else (error 'parse-field "invalid input")]))
 
 (define (parse-method [s : s-expression]) : MethodI
@@ -31,6 +32,14 @@
     (methodI (s-exp->symbol (first (s-exp->list s)))
              (parse (second (s-exp->list s))))]
    [else (error 'parse-method "invalid input")]))
+
+(define (parse-basetype [s : s-expression]) : BaseType
+  (cond
+    [(s-exp-match? `num s)
+     (numBT)]
+    [(s-exp-match? `obj s)
+     (objBT)]
+    [else (error 'parse-basetype "invalid input")]))
 
 (define (parse [s : s-expression]) : ExprI
   (cond
@@ -44,9 +53,8 @@
    [(s-exp-match? '{* ANY ANY} s)
     (multI (parse (second (s-exp->list s)))
            (parse (third (s-exp->list s))))]
-   [(s-exp-match? '{new SYMBOL ANY ...} s)
-    (newI (s-exp->symbol (second (s-exp->list s)))
-          (map parse (rest (rest (s-exp->list s)))))]
+   [(s-exp-match? '{new SYMBOL} s)
+    (newI (s-exp->symbol (second (s-exp->list s))))]
    [(s-exp-match? '{get ANY SYMBOL} s)
     (getI (parse (second (s-exp->list s)))
           (s-exp->symbol (third (s-exp->list s))))]
@@ -81,8 +89,8 @@
         (plusI (numI 1) (numI 2)))
   (test (parse '{* 1 2})
         (multI (numI 1) (numI 2)))
-  (test (parse '{new posn 1 2})
-        (newI 'posn (list (numI 1) (numI 2))))
+  (test (parse '{new posn})
+        (newI 'posn))
   (test (parse '{get 1 x})
         (getI (numI 1) 'x))
   (test (parse '{set 2 x 1})
@@ -100,8 +108,12 @@
   (test/exn (parse `x)
             "invalid input")
 
-  (test (parse-field `x)
-        'x)
+  (test (parse-field `[x : num])
+        (fieldC 'x (numBT)))
+  (test (parse-field '[y : obj])
+        (fieldC 'y (objBT)))
+  (test/exn (parse-field '{x : 1})
+            "invalid input")
   (test/exn (parse-field '{x 1})
             "invalid input")
 
@@ -111,11 +123,11 @@
             "invalid input")
   
   (test (parse-class '{class posn3D extends posn
-                             {x y z}
+                             {[x : num] [y : num] [z : num]}
                              {m1 arg}
                              {m2 this}})
         (classI 'posn3D 'posn
-                (list 'x 'y 'z)
+                (list (fieldC 'x (numBT)) (fieldC 'y (numBT)) (fieldC 'z (numBT)))
                 (list (methodI 'm1 (argI))
                       (methodI 'm2 (thisI)))))
   (test/exn (parse-class '{class})
@@ -142,28 +154,28 @@
  (test (interp-prog 
         (list
          '{class posn extends object
-                 {x y}
+                 {[x : num] [y : num]}
                  {mdist {+ {get this x} {get this y}}}
                  {addDist {+ {send arg mdist 0}
                              {send this mdist 0}}}}
          
          '{class posn3D extends posn
-                 {z}
+                 {[z : num]}
                  {mdist {+ {get this z} 
                            {super mdist arg}}}})
         
-        '{send {new posn3D 5 3 1} addDist {new posn 2 7}})
+        '{send {set {set {set {new posn3D} x 5} y 3} z 1} addDist {set {set {new posn} x 2} y 7}})
        '18)
 
   (test (interp-prog
          (list
           '{class posn extends object
-                 {x y}
+                 {[x : num] [y : num]}
                  {mdist {+ {get this x} {get this y}}}
                  {addDist {+ {send arg mdist 0}
                              {send this mdist 0}}}})
 
-         '{if0 {+ {send {cast posn {new posn 2 7}} mdist null} -9}
+         '{if0 {+ {send {cast posn {set {set {new posn} x 2} y 7}} mdist null} -9}
                null
                1})
         `null))

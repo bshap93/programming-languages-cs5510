@@ -8,8 +8,7 @@
          (rhs : ExprC)]
   [argC]
   [thisC]
-  [newC (class-name : symbol)
-        (args : (listof ExprC))]
+  [newC (class-name : symbol)]
   [getC (obj-expr : ExprC)
         (field-name : symbol)]
   [setC (obj-expr : ExprC)
@@ -32,12 +31,25 @@
 (define-type ClassC
   [classC (name : symbol)
           (super-name : symbol)
-          (field-names : (listof symbol))
+          (fields : (listof FieldC))
           (methods : (listof MethodC))])
+
+(define-type FieldC
+  [fieldC (name : symbol)
+          (type : BaseType)])
 
 (define-type MethodC
   [methodC (name : symbol)
            (body-expr : ExprC)])
+
+(define-type BaseType
+  [numBT]
+  [objBT])
+
+(define (base-type->default-val bt)
+  (type-case BaseType bt
+    [numBT () (numV 0)]
+    [objBT () (nullV)]))
 
 (define-type Value
   [numV (n : number)]
@@ -70,13 +82,13 @@
   [kons (first : 'a) (rest : 'b)])
 
 (define (get-field [name : symbol] 
-                   [field-names : (listof symbol)] 
+                   [fields : (listof FieldC)]
                    [vals : (listof (boxof Value))])
   ;; Pair fields and values, find by field name,
   ;; then extract value from pair
-  (kons-rest ((make-find kons-first)
+  (kons-rest ((make-find (lambda (el) (fieldC-name (kons-first el))))
               name
-              (map2 kons field-names vals))))
+              (map2 kons fields vals))))
 
 (module+ test
   (test/exn (find-class 'a empty)
@@ -87,7 +99,7 @@
                              (classC 'b 'object empty empty)))
         (classC 'b 'object empty empty))
   (test (get-field 'a 
-                   (list 'a 'b)
+                   (list (fieldC 'a (numBT)) (fieldC 'b (numBT)))
                    (list (box (numV 0)) (box (numV 1))))
         (box (numV 0))))
 
@@ -103,12 +115,10 @@
         [multC (l r) (num* (recur l) (recur r))]
         [thisC () this-val]
         [argC () arg-val]
-        [newC (class-name field-exprs)
-              (local [(define c (find-class class-name classes))
-                      (define vals (map recur field-exprs))]
-                (if (= (length vals) (length (classC-field-names c)))
-                    (objV class-name (map box vals))
-                    (error 'interp "wrong field count")))]
+        [newC (class-name)
+              (objV class-name (map (lambda (el)
+                                      (box (base-type->default-val (fieldC-type el))))
+                                    (classC-fields (find-class class-name classes))))]
         [getC (obj-expr field-name)
               (unbox (get-field-box (recur obj-expr) field-name classes))]
         [setC (obj-expr field-name arg-expr)
@@ -151,8 +161,8 @@
   (type-case Value obj-val
     [objV (class-name field-vals)
           (type-case ClassC (find-class class-name classes)
-            [classC (name super-name field-names methods)
-                    (get-field field-name field-names field-vals)])]
+            [classC (name super-name fields methods)
+                    (get-field field-name fields field-vals)])]
     [else (error 'interp "not an object")]))
 
 (define (is-instance [class-name : symbol] [ancestor-name : symbol] [classes : (listof ClassC)]) : boolean
@@ -160,13 +170,13 @@
     [(equal? class-name ancestor-name) #t]
     [(equal? class-name 'object) #f]
     [else (type-case ClassC (find-class class-name classes)
-            [classC (name super-name field-names methods)
+            [classC (name super-name fields methods)
                     (is-instance super-name ancestor-name classes)])]))
 
 (define (call-method class-name method-name classes
                      obj arg-val)
   (type-case ClassC (find-class class-name classes)
-    [classC (name super-name field-names methods)
+    [classC (name super-name fields methods)
             (type-case MethodC (find-method method-name methods)
               [methodC (name body-expr)
                        (interp body-expr
@@ -198,7 +208,8 @@
     (classC 
      'posn
      'object
-     (list 'x 'y)
+     (list (fieldC 'x (numBT))
+           (fieldC 'y (numBT)))
      (list (methodC 'mdist
                     (plusC (getC (thisC) 'x) (getC (thisC) 'y)))
            (methodC 'addDist
@@ -207,13 +218,15 @@
            (methodC 'addX
                     (plusC (getC (thisC) 'x) (argC)))
            (methodC 'multY (multC (argC) (getC (thisC) 'y)))
-           (methodC 'factory12 (newC 'posn (list (numC 1) (numC 2)))))))
+           (methodC 'factory12 (setC (setC (newC 'posn) 'x (numC 1)) 'y (numC 2))))))
 
   (define posn3D-class
     (classC 
      'posn3D
      'posn
-     (list 'x 'y 'z)
+     (list (fieldC 'x (numBT))
+           (fieldC 'y (numBT))
+           (fieldC 'z (numBT)))
      (list (methodC 'mdist (plusC (getC (thisC) 'z)
                                   (ssendC (thisC) 'posn 'mdist (argC))))
            (methodC 'addDist (ssendC (thisC) 'posn 'addDist (argC))))))
@@ -222,14 +235,14 @@
     (classC
      'setC-tester
      'object
-     (list)
+     (list (fieldC 'x (objBT)))
      (list (methodC 'test (if0C (getC (setC (argC) 'x (numC 0)) 'x)
                                 (argC) ; same arg-val, but field should be updated
                                 (nullC))))))
 
-  (define posn27 (newC 'posn (list (numC 2) (numC 7))))
-  (define posn531 (newC 'posn3D (list (numC 5) (numC 3) (numC 1))))
-  (define setctester (newC 'setC-tester (list)))
+  (define posn27 (setC (setC (newC 'posn) 'x (numC 2)) 'y (numC 7)))
+  (define posn531 (setC (setC (setC (newC 'posn3D) 'x (numC 5)) 'y (numC 3)) 'z (numC 1)))
+  (define setctester (newC 'setC-tester))
 
   (define (interp-posn a)
     (interp a (list posn-class posn3D-class) (numV -1) (numV -1))))
@@ -247,7 +260,7 @@
                 empty (numV -1) (numV -1))
         (numV 70))
 
-  (test (interp-posn (newC 'posn (list (numC 2) (numC 7))))
+  (test (interp-posn posn27)
         (objV 'posn (list (box (numV 2)) (box (numV 7)))))
 
   (test (interp-posn (sendC posn27 'mdist (numC 0)))
@@ -272,8 +285,6 @@
             "not an object")
   (test/exn (interp-posn (ssendC (numC 1) 'posn 'mdist (numC 0)))
             "not an object")
-  (test/exn (interp-posn (newC 'posn (list (numC 0))))
-            "wrong field count")
 
   ; castC
   (test (interp-posn (castC 'posn posn27))
@@ -300,7 +311,7 @@
   ; nullC
   (test (interp-posn (nullC))
         (nullV))
-  (test (interp-posn (newC 'posn (list (nullC) (nullC))))
+  (test (interp-posn (setC (setC (newC 'posn) 'x (nullC)) 'y (nullC)))
         (objV 'posn (list (box (nullV)) (box (nullV)))))
   (test (interp-posn (sendC posn27 'mdist (nullC)))
         (numV 9))
@@ -317,4 +328,12 @@
   (test (interp-posn (getC posn27 'x))
         (numV 2))
   (test (interp (sendC setctester 'test posn27) (list setC-test-class posn-class) (numV -1) (numV -1)) ; test imperative update
-        (objV 'posn (list (box (numV 0)) (box (numV 7))))))
+        (objV 'posn (list (box (numV 0)) (box (numV 7)))))
+  (test/exn (interp-posn (setC posn27 'z (numC 3)))
+            "not found")
+
+  ; the new new
+  (test (interp-posn (getC (newC 'posn) 'x))
+        (numV 0))
+  (test (interp (getC (newC 'setC-tester) 'x) (list setC-test-class) (numV -1) (numV -1))
+        (nullV)))

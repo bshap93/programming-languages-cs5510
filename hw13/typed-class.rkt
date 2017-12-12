@@ -150,19 +150,10 @@
         [thisI () (type-case Type this-type
                     [unsetT () (error 'typecheck "this not bound")]
                     [else this-type])]
-        [newI (class-name exprs)
-              (local [(define arg-types (map recur exprs))
-                      (define field-types
-                        (get-all-field-types class-name t-classes))]
-                (if (and (= (length arg-types) (length field-types))
-                         (foldl (lambda (b r) (and r b))
-                                true
-                                (map2 (lambda (t1 t2) 
-                                        (is-subtype? t1 t2 t-classes))
-                                      arg-types
-                                      field-types)))
-                    (objT class-name)
-                    (type-error expr "field type mismatch")))]
+        [newI (class-name)
+              (begin
+                (get-all-field-types class-name t-classes) ; implicitly validates the class-name
+                (objT class-name))]
         [getI (obj-expr field-name)
               (get-obj-field-type obj-expr (recur obj-expr) field-name t-classes)]
         [setI (obj-expr field-name arg-expr)
@@ -332,16 +323,16 @@
             (list (fieldT 'topleft (objT 'posn))
                   (fieldT 'other (objT 'posn3D)))
             (list (methodT 'dup (objT 'posn) (objT 'square)
-                           (newI 'square (list (getI (thisI) 'topleft) (nullI)))))))
+                           (setI (setI (newI 'square) 'topleft (getI (thisI) 'topleft)) 'other (nullI))))))
 
   (define (typecheck-posn a)
     (typecheck a
                (list posn-t-class posn3D-t-class posn3D2-t-class square-t-class)))
   
-  (define posn27 (newI 'posn (list (numI 2) (numI 7))))
-  (define posn531 (newI 'posn3D (list (numI 5) (numI 3) (numI 1))))
-  (define posn135 (newI 'posn3D2 (list (numI 1) (numI 3) (numI 5))))
-  (define square-posn27 (newI 'square (list posn27 (nullI))))
+  (define posn27 (setI (setI (newI 'posn) 'x (numI 2)) 'y (numI 7)))
+  (define posn531 (setI (setI (setI (newI 'posn3D) 'x (numI 5)) 'y (numI 3)) 'z (numI 1)))
+  (define posn135 (setI (setI (setI (newI 'posn3D2) 'x (numI 1)) 'y (numI 3)) 'w (numI 5)))
+  (define square-posn27 (setI (setI (newI 'square) 'topleft posn27) 'other (nullI)))
 
   (define reflector-t-class
     (classT 'reflector 'object
@@ -360,9 +351,9 @@
   (test (typecheck-posn (sendI posn27 'addDist posn531))
         (numT))
 
-  (test (typecheck-posn (newI 'square (list (newI 'posn (list (numI 0) (numI 1))) (nullI))))
+  (test (typecheck-posn (setI (newI 'square) 'topleft (setI (setI (newI 'posn) 'x (numI 0)) 'y (numI 1))))
         (objT 'square))
-  (test (typecheck-posn (newI 'square (list (newI 'posn3D (list (numI 0) (numI 1) (numI 3))) (nullI))))
+  (test (typecheck-posn (setI (setI (newI 'square) 'topleft (setI (setI (setI (newI 'posn3D) 'x (numI 0)) 'y (numI 1)) 'z (numI 3))) 'other (nullI)))
         (objT 'square))
   
   (test (typecheck (multI (numI 1) (numI 2))
@@ -373,15 +364,15 @@
             "no type")
   (test/exn (typecheck-posn (sendI posn27 'mdist posn27))
             "no type")
-  (test/exn (typecheck (plusI (numI 1) (newI 'object empty))
+  (test/exn (typecheck (plusI (numI 1) (newI 'object))
                        empty)
             "no type")
-  (test/exn (typecheck (plusI (newI 'object empty) (numI 1))
+  (test/exn (typecheck (plusI (newI 'object) (numI 1))
                        empty)
             "no type")
-  (test/exn (typecheck (plusI (numI 1) (newI 'object (list (numI 1))))
+  (test/exn (typecheck (plusI (numI 1) (setI (newI 'object) 'x (numI 1)))
                        empty)
-            "no type")
+            "not found")
   (test/exn (typecheck (getI (numI 1) 'x)
                        empty)
             "no type")
@@ -406,11 +397,11 @@
             "not found")
 
   ; Test that the typechecker disallows use of unset `this` and `arg`
-  (test (typecheck (sendI (newI 'reflector (list)) 'arg (numI 22)) (list reflector-t-class))
+  (test (typecheck (sendI (newI 'reflector) 'arg (numI 22)) (list reflector-t-class))
         (numT))
-  (test (typecheck (sendI (newI 'reflector (list)) 'this (numI 0)) (list reflector-t-class))
+  (test (typecheck (sendI (newI 'reflector) 'this (numI 0)) (list reflector-t-class))
         (objT 'reflector))
-  (test/exn (typecheck (sendI (newI 'reflector (list)) 'arg (argI)) (list reflector-t-class))
+  (test/exn (typecheck (sendI (newI 'reflector) 'arg (argI)) (list reflector-t-class))
             "arg not bound")
   (test/exn (typecheck (thisI) (list))
             "this not bound")
@@ -464,15 +455,15 @@
   (test/exn (typecheck-posn (sendI (nullI) 'm (numI 0)))
             "no type")
 
-  (test (typecheck-posn (newI 'square (list (nullI) (nullI)))) ; unused null field value and arg value
+  (test (typecheck-posn (newI 'square)) ; unused null field value and arg value
         (objT 'square))
-  (test (typecheck-posn (sendI (newI 'square (list (nullI) (nullI))) 'dup (nullI)))
+  (test (typecheck-posn (sendI (newI 'square) 'dup (nullI)))
         (objT 'square))
 
   ; Test set
-  (test (typecheck-posn (setI (newI 'square (list (nullI) (nullI))) 'topleft posn531))
+  (test (typecheck-posn (setI (newI 'square) 'topleft posn531))
         (objT 'square))
-  (test/exn (typecheck-posn (setI (newI 'square (list (nullI) (nullI))) 'other posn27))
+  (test/exn (typecheck-posn (setI (newI 'square) 'other posn27))
             "field type mismatch"))
 
 ;; ----------------------------------------
@@ -484,12 +475,28 @@
               (classI
                name 
                super-name
-               (map fieldT-name fields)
+               (map fieldT->fieldC fields)
                (map (lambda (m)
                       (type-case MethodT m
                         [methodT (name arg-type result-type body-expr)
                                  (methodI name body-expr)]))
                     methods))])))
+
+(define (fieldT->fieldC field)
+  (type-case FieldT field
+    [fieldT (name type)
+            (type-case Type type
+              [numT () (fieldC name (numBT))]
+              [objT (class-name) (fieldC name (objBT))]
+              [else (error 'strip-types "unknown basetype")])]))
+
+(module+ test
+  (test (fieldT->fieldC (fieldT 'z (numT)))
+        (fieldC 'z (numBT)))
+  (test (fieldT->fieldC (fieldT 'y (objT 'some-class)))
+        (fieldC 'y (objBT)))
+  (test/exn (fieldT->fieldC (fieldT 'x (unsetT)))
+            "unknown basetype"))
 
 (define interp-t : (ExprI (listof ClassT) -> Value)
   (lambda (a t-classes)
