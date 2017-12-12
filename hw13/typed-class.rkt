@@ -164,17 +164,12 @@
                     (objT class-name)
                     (type-error expr "field type mismatch")))]
         [getI (obj-expr field-name)
-              (type-case Type (recur obj-expr)
-                [objT (class-name)
-                      (local [(define t-class
-                                (find-classT class-name t-classes))
-                              (define field
-                                (find-field-in-tree field-name
-                                                    t-class
-                                                    t-classes))]
-                        (type-case FieldT field
-                          [fieldT (name type) type]))]
-                [else (type-error obj-expr "object")])]
+              (get-obj-field-type obj-expr (recur obj-expr) field-name t-classes)]
+        [setI (obj-expr field-name arg-expr)
+              (local [(define obj-type (recur obj-expr))]
+                (if (is-subtype? (recur arg-expr) (get-obj-field-type obj-expr obj-type field-name t-classes) t-classes)
+                    obj-type
+                    (type-error expr "field type mismatch")))]
         [sendI (obj-expr method-name arg-expr)
                (local [(define obj-type (recur obj-expr))
                        (define arg-type (recur arg-expr))]
@@ -206,6 +201,19 @@
                 [numT () (least-upper-bound (recur thn) (recur els) t-classes)]
                 [else (type-error tst "num")])]
         [nullI () (nullT)]))))
+
+(define (get-obj-field-type obj-expr t-obj field-name t-classes)
+  (type-case Type t-obj
+    [objT (class-name)
+          (local [(define t-class
+                    (find-classT class-name t-classes))
+                  (define field
+                    (find-field-in-tree field-name
+                                        t-class
+                                        t-classes))]
+            (type-case FieldT field
+              [fieldT (name type) type]))]
+    [else (type-error obj-expr "object")]))
 
 (define (least-upper-bound type-a type-b t-classes)
   (type-case Type type-a
@@ -321,9 +329,10 @@
 
   (define square-t-class 
     (classT 'square 'object
-            (list (fieldT 'topleft (objT 'posn)))
+            (list (fieldT 'topleft (objT 'posn))
+                  (fieldT 'other (objT 'posn3D)))
             (list (methodT 'dup (objT 'posn) (objT 'square)
-                           (newI 'square (list (getI (thisI) 'topleft)))))))
+                           (newI 'square (list (getI (thisI) 'topleft) (nullI)))))))
 
   (define (typecheck-posn a)
     (typecheck a
@@ -332,7 +341,7 @@
   (define posn27 (newI 'posn (list (numI 2) (numI 7))))
   (define posn531 (newI 'posn3D (list (numI 5) (numI 3) (numI 1))))
   (define posn135 (newI 'posn3D2 (list (numI 1) (numI 3) (numI 5))))
-  (define square-posn27 (newI 'square (list posn27)))
+  (define square-posn27 (newI 'square (list posn27 (nullI))))
 
   (define reflector-t-class
     (classT 'reflector 'object
@@ -351,9 +360,9 @@
   (test (typecheck-posn (sendI posn27 'addDist posn531))
         (numT))
 
-  (test (typecheck-posn (newI 'square (list (newI 'posn (list (numI 0) (numI 1))))))
+  (test (typecheck-posn (newI 'square (list (newI 'posn (list (numI 0) (numI 1))) (nullI))))
         (objT 'square))
-  (test (typecheck-posn (newI 'square (list (newI 'posn3D (list (numI 0) (numI 1) (numI 3))))))
+  (test (typecheck-posn (newI 'square (list (newI 'posn3D (list (numI 0) (numI 1) (numI 3))) (nullI))))
         (objT 'square))
   
   (test (typecheck (multI (numI 1) (numI 2))
@@ -455,10 +464,16 @@
   (test/exn (typecheck-posn (sendI (nullI) 'm (numI 0)))
             "no type")
 
-  (test (typecheck-posn (newI 'square (list (nullI)))) ; unused null field value and arg value
+  (test (typecheck-posn (newI 'square (list (nullI) (nullI)))) ; unused null field value and arg value
         (objT 'square))
-  (test (typecheck-posn (sendI (newI 'square (list (nullI))) 'dup (nullI)))
-        (objT 'square)))
+  (test (typecheck-posn (sendI (newI 'square (list (nullI) (nullI))) 'dup (nullI)))
+        (objT 'square))
+
+  ; Test set
+  (test (typecheck-posn (setI (newI 'square (list (nullI) (nullI))) 'topleft posn531))
+        (objT 'square))
+  (test/exn (typecheck-posn (setI (newI 'square (list (nullI) (nullI))) 'other posn27))
+            "field type mismatch"))
 
 ;; ----------------------------------------
 

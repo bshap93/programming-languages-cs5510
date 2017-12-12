@@ -17,6 +17,9 @@
         (args : (listof ExprI))]
   [getI (obj-expr : ExprI)
         (field-name : symbol)]
+  [setI (obj-expr : ExprI)
+        (field-name : symbol)
+        (arg-expr : ExprI)]
   [sendI (obj-expr : ExprI)
          (method-name : symbol)
          (arg-expr : ExprI)]
@@ -57,6 +60,8 @@
             (newC class-name (map recur field-exprs))]
       [getI (expr field-name)
             (getC (recur expr) field-name)]
+      [setI (expr field-name arg-expr)
+            (setC (recur expr) field-name (recur arg-expr))]
       [sendI (expr method-name arg-expr)
              (sendC (recur expr)
                     method-name
@@ -90,6 +95,8 @@
         (newC 'object (list (numC 1))))
   (test (expr-i->c (getI (numI 1) 'x) 'object)
         (getC (numC 1) 'x))
+  (test (expr-i->c (setI (nullI) 'x (numI 1)) 'object)
+        (setC (nullC) 'x (numC 1)))
   (test (expr-i->c (sendI (numI 1) 'mdist (numI 2)) 'object)
         (sendC (numC 1) 'mdist (numC 2)))
   (test (expr-i->c (superI 'mdist (numI 2)) 'posn)
