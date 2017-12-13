@@ -96,68 +96,131 @@
       [numV (n) (number->s-exp n)]
       [objV (class-name field-vals) `object]
       [nullV () `null]
-      [arrV (vals) `array])))
+      [arrV (type-name vals) `array])))
 
 (module+ test
   (test (interp-t-prog
          (list
           '{class empty extends object
-                  {}})
+             {}})
          '{new empty})
         `object)
 
- (test (interp-t-prog 
-        (list
-         '{class posn extends object
-                 {[x : num]
-                  [y : num]}
-                 {mdist : num -> num
-                        {+ {get this x} {get this y}}}
-                 {addDist : posn -> num
-                          {+ {send arg mdist 0}
-                             {send this mdist 0}}}}
-         
-         '{class posn3D extends posn
-                 {[z : num]}
-                 {mdist : num -> num
-                        {+ {get this z} 
-                           {super mdist arg}}}})
-        
-        '{send {set {set {set {new posn3D} x 5} y 3} z 1} addDist {set {set {new posn} x 2} y 7}})
-       '18)
+  (define posn-t-class
+    '{class posn extends object
+             {[x : num]
+              [y : num]}
+             {mdist : num -> num
+                    {+ {get this x} {get this y}}}
+             {addDist : posn -> num
+                      {+ {send arg mdist 0}
+                         {send this mdist 0}}}})
+  (define posn3D-t-class
+    '{class posn3D extends posn
+             {[z : num]}
+             {mdist : num -> num
+                    {+ {get this z} 
+                       {super mdist arg}}}})
+
+  (test (interp-t-prog 
+         (list posn-t-class posn3D-t-class)
+         '{send {set {set {set {new posn3D} x 5} y 3} z 1} addDist {set {set {new posn} x 2} y 7}})
+        '18)
 
   (test (interp-t-prog
-         (list
-          '{class posn extends object
-                 {[x : num]
-                  [y : num]}
-                 {mdist : num -> num
-                        {+ {get this x} {get this y}}}
-                 {addDist : posn -> num
-                          {+ {send arg mdist 0}
-                             {send this mdist 0}}}}
-
-          '{class posn3D extends posn
-                 {[z : num]}
-                 {mdist : num -> num
-                        {+ {get this z} 
-                           {super mdist arg}}}})
-
+         (list posn-t-class posn3D-t-class)
          '{if0 {+ {send {cast posn {set {set {set {new posn3D} x 5} y 3} z 1}} mdist null} -9}
                null
                {set {set {new posn} x 2} y 2}})
         `null)
 
   (test (interp-t-prog
-         (list
-          '{class posn extends object
-                 {[x : num]
-                  [y : num]}
-                 {mdist : num -> num
-                        {+ {get this x} {get this y}}}
-                 {addDist : posn -> num
-                          {+ {send arg mdist 0}
-                             {send this mdist 0}}}})
-         
+         (list posn-t-class)
          '{newarray posn 5 {set {new posn} x 5}})
-         `array))
+        `array)
+
+  (test (interp-t-prog
+         (list posn-t-class
+               posn3D-t-class
+               '{class tester extends object
+                  {[x : {arr posn}]}
+                  {update : posn -> num
+                          {arrayset {get this x} 3 arg}}})
+         '{send
+           {set
+            {new tester}
+            x
+            {newarray posn3D 5 {set {set {set {new posn3D} x 5} y 3} z 1}}}
+           update
+           {new posn3D}})
+        '0)
+
+  (test/exn (interp-t-prog
+             (list posn-t-class
+                   posn3D-t-class
+                   '{class tester extends object
+                      {[x : {arr posn}]}
+                      {update : posn -> num
+                              {arrayset {get this x} 3 arg}}})
+             '{send
+               {set
+                {new tester}
+                x
+                {newarray posn3D 5 {set {set {set {new posn3D} x 5} y 3} z 1}}}
+               update
+               {new posn}})
+            "array type violation"))
+
+;; -----------------------------------------
+
+(define (run-prog [classes : (listof s-expression)] [a : s-expression]) : Value
+  (let [(prog (parse a))
+        (classes (map parse-t-class classes))]
+    (begin
+      (typecheck prog classes)
+      (interp-t prog classes))))
+
+(module+ test
+  (test/exn (run-prog
+             (list)
+             '{send this method 5})
+            "this not bound")
+
+  (test/exn (run-prog
+             (list posn-t-class)
+             '{send (new posn) mdist arg})
+            "arg not bound")
+
+  (test/exn (run-prog 
+             (list posn-t-class posn3D-t-class)
+             '{cast posn3D {set {set {new posn} x 2} y 7}})
+            "cast failed")
+  
+  (test (run-prog 
+         (list posn-t-class posn3D-t-class)
+         '{send {set {set {set {new posn3D} x 5} y 3} z 1} addDist
+                {cast posn {set {set {set {new posn3D} x 2} y 7} z 1}}})
+        (numV 19))
+  
+  (test (run-prog
+         (list posn-t-class
+               posn3D-t-class
+               '{class tester extends object
+                  {[x : {arr posn}]}
+                  {update : posn -> num
+                          {arrayset {get this x} 3 arg}}
+                  {test : tester -> {arr posn}
+                        {if0 {send arg update {new posn3D}}
+                             {get arg x}
+                             null}}})
+         
+         '{send {new tester} test {set
+                                   {new tester}
+                                   x
+                                   {newarray posn3D 5 {set {set {set {new posn3D} x 5} y 3} z 1}}}})
+        
+        (arrV 'posn3D (list (box (objV 'posn3D (list (box (numV 5)) (box (numV 3)) (box (numV 1)))))
+                            (box (objV 'posn3D (list (box (numV 5)) (box (numV 3)) (box (numV 1)))))
+                            (box (objV 'posn3D (list (box (numV 5)) (box (numV 3)) (box (numV 1)))))
+                            (box (objV 'posn3D (list (box (numV 0)) (box (numV 0)) (box (numV 0)))))
+                            (box (objV 'posn3D (list (box (numV 5)) (box (numV 3)) (box (numV 1)))))))))

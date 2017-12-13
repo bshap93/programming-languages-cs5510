@@ -97,7 +97,11 @@
             [objT (name2)
                   (is-subclass? name1 name2 t-classes)]
             [else false])] ; no object is a subtype of null
-    [nullT () (or (objT? t2) (equal? t1 t2))] ; null is a subtype of every object, and itself
+    [nullT () (or (objT? t2) (arrT? t2) (equal? t1 t2))] ; null is a subtype of every object, array, and itself
+    [arrT (el-type1)
+          (type-case Type t2
+            [arrT (el-type2) (is-subtype? el-type1 el-type2 t-classes)]
+            [else false])]
     [else (equal? t1 t2)]))
 
 (module+ test
@@ -126,6 +130,14 @@
   (test (is-subtype? (nullT) (nullT) empty)
         true)
   (test (is-subtype? (objT 'a) (nullT) (list a-t-class))
+        false)
+  (test (is-subtype? (arrT (objT 'a)) (arrT (objT 'a)) (list a-t-class))
+        true)
+  (test (is-subtype? (arrT (objT 'b)) (arrT (objT 'a)) (list a-t-class b-t-class))
+        true)
+  (test (is-subtype? (arrT (objT 'a)) (arrT (objT 'b)) (list a-t-class b-t-class))
+        false)
+  (test (is-subtype? (arrT (objT 'a)) (objT 'a) (list a-t-class))
         false))
 
 ;; ----------------------------------------
@@ -201,11 +213,10 @@
         [nullI () (nullT)]
         [newarrayI (type-name size init-expr)
                    (type-case Type (recur size)
-                     [numT () (local [(define init-type (recur init-expr))
-                                      (define el-type (objT type-name))]
-                                (if (is-subtype? init-type el-type t-classes)
+                     [numT () (local [(define el-type (objT type-name))]
+                                (if (is-subtype? (recur init-expr) el-type t-classes)
                                     (arrT el-type)
-                                    (type-error init-type (to-string el-type))))]
+                                    (type-error init-expr (to-string el-type))))]
                      [else (type-error size "num")])]
         [arrayrefI (array index)
                    (array-op array index
@@ -237,9 +248,14 @@
                   (least-common-superclass a-class-name b-class-name t-classes)]
             [nullT () type-a]
             [else (type-error type-a (to-string type-b))])]
-    [nullT () (if (or (objT? type-b) (equal? type-a type-b)) ; null is upper-bounded by any object, or null
+    [nullT () (if (or (objT? type-b) (arrT? type-b) (equal? type-a type-b)) ; null is upper-bounded by any object, or null
                   type-b
                   (type-error type-a (to-string type-b)))]
+    [arrT (el-type1)
+          (type-case Type type-b
+            [arrT (el-type2) (arrT (least-upper-bound el-type1 el-type2 t-classes))]
+            [nullT () type-a]
+            [else (type-error type-a (to-string type-b))])]
     [else (if (equal? type-a type-b)
               type-a
               (type-error type-a (to-string type-b)))]))
@@ -348,15 +364,6 @@
             (list (methodT 'dup (objT 'posn) (objT 'square)
                            (setI (setI (newI 'square) 'topleft (getI (thisI) 'topleft)) 'other (nullI))))))
 
-  (define (typecheck-posn a)
-    (typecheck a
-               (list posn-t-class posn3D-t-class posn3D2-t-class square-t-class)))
-  
-  (define posn27 (setI (setI (newI 'posn) 'x (numI 2)) 'y (numI 7)))
-  (define posn531 (setI (setI (setI (newI 'posn3D) 'x (numI 5)) 'y (numI 3)) 'z (numI 1)))
-  (define posn135 (setI (setI (setI (newI 'posn3D2) 'x (numI 1)) 'y (numI 3)) 'w (numI 5)))
-  (define square-posn27 (setI (setI (newI 'square) 'topleft posn27) 'other (nullI)))
-
   (define reflector-t-class
     (classT 'reflector 'object
             (list)
@@ -364,6 +371,21 @@
                            (argI))
                   (methodT 'this (numT) (objT 'reflector)
                            (thisI)))))
+
+  (define arr-t-class
+    (classT 'arrtester 'object
+            (list (fieldT 'x (arrT (objT 'posn))))
+            (list)))
+
+  (define (typecheck-posn a)
+    (typecheck a
+               (list posn-t-class posn3D-t-class posn3D2-t-class square-t-class arr-t-class)))
+  
+  (define posn27 (setI (setI (newI 'posn) 'x (numI 2)) 'y (numI 7)))
+  (define posn531 (setI (setI (setI (newI 'posn3D) 'x (numI 5)) 'y (numI 3)) 'z (numI 1)))
+  (define posn135 (setI (setI (setI (newI 'posn3D2) 'x (numI 1)) 'y (numI 3)) 'w (numI 5)))
+  (define square-posn27 (setI (setI (newI 'square) 'topleft posn27) 'other (nullI)))
+  (define arrtester (newI 'arrtester))
 
   (test (typecheck-posn (sendI posn27 'mdist (numI 0)))
         (numT))
@@ -462,6 +484,18 @@
             "no type")
   (test/exn (typecheck-posn (if0I (numI 0) (numI 1) posn27))
             "no type")
+  (test (typecheck-posn (if0I (numI 0)
+                              (newarrayI 'posn3D (numI 5) posn531)
+                              (newarrayI 'posn (numI 3) posn27)))
+        (arrT (objT 'posn)))
+  (test (typecheck-posn (if0I (numI 0)
+                              (newarrayI 'posn3D (numI 77) posn531)
+                              (nullI)))
+        (arrT (objT 'posn3D)))
+  (test/exn (typecheck-posn (if0I (numI 0)
+                                  (newarrayI 'posn3D (numI 77) posn531)
+                                  posn531))
+            "no type")
 
   ; Test null
   (test (typecheck-posn (if0I (numI 0) (nullI) posn27)) ; null + if0
@@ -509,7 +543,9 @@
   (test/exn (typecheck-posn (arraysetI (numI 0) (numI 0) posn27))
             "no type")
   (test/exn (typecheck-posn (arraysetI (newarrayI 'posn3D (numI 5) posn531) (numI 0) posn27))
-            "no type"))
+            "no type")
+  (test (typecheck-posn (setI arrtester 'x (newarrayI 'posn3D (numI 5) posn531))) ; array of subtype is subtype of array of type
+            (objT 'arrtester)))
 
 ;; ----------------------------------------
 
@@ -529,17 +565,22 @@
 
 (define (fieldT->fieldC field)
   (type-case FieldT field
-    [fieldT (name type)
-            (type-case Type type
-              [numT () (fieldC name (numBT))]
-              [objT (class-name) (fieldC name (objBT))]
-              [else (error 'strip-types "unknown basetype")])]))
+    [fieldT (name type) (fieldC name (type->basetype type))]))
+
+(define (type->basetype type)
+  (type-case Type type
+    [numT () (numBT)]
+    [objT (class-name) (objBT)]
+    [arrT (el-type) (arrBT (type->basetype el-type))]
+    [else (error 'strip-types "unknown basetype")]))
 
 (module+ test
   (test (fieldT->fieldC (fieldT 'z (numT)))
         (fieldC 'z (numBT)))
   (test (fieldT->fieldC (fieldT 'y (objT 'some-class)))
         (fieldC 'y (objBT)))
+  (test (fieldT->fieldC (fieldT 'x (arrT (objT 'some-class))))
+        (fieldC 'x (arrBT (objBT))))
   (test/exn (fieldT->fieldC (fieldT 'x (unsetT)))
             "unknown basetype"))
 

@@ -27,7 +27,8 @@
         (thn : ExprC)
         (els : ExprC)]
   [nullC]
-  [newarrayC (size : ExprC)
+  [newarrayC (type-name : symbol)
+             (size : ExprC)
              (init-expr : ExprC)]
   [arrayrefC (array : ExprC)
              (index : ExprC)]
@@ -64,7 +65,8 @@
   [numV (n : number)]
   [objV (class-name : symbol)
         (field-values : (listof (boxof Value)))]
-  [arrV (values : (listof (boxof Value)))]
+  [arrV (type-name : symbol)
+        (values : (listof (boxof Value)))]
   [nullV])
 
 (module+ test
@@ -125,7 +127,7 @@
                                 (error 'interp "index out of bounds")
                                 (local [(define arr-val (recur array))]
                                   (type-case Value arr-val
-                                    [arrV (vals) (func vals idx)]
+                                    [arrV (type-name vals) (func type-name vals idx)]
                                     [else (error 'interp "not an array")])))]
                 [else (error 'interp "not a number")]))]
       (type-case ExprC a
@@ -172,20 +174,26 @@
                   (recur thn)
                   (recur els))]
         [nullC () (nullV)]
-        [newarrayC (size init-expr)
+        [newarrayC (type-name size init-expr)
                    (type-case Value (recur size)
                      [numV (n) (if (< n 0)
                                    (error 'interp "negative size array")
-                                   (arrV (init-array n (recur init-expr))))]
+                                   (arrV type-name (init-array n (recur init-expr))))]
                      [else (error 'interp "not a number")])]
         [arrayrefC (array index)
                    (array-op array index
-                             (lambda (vals idx) (array-get vals idx)))]
+                             (lambda (type-name vals idx) (array-get vals idx)))]
         [arraysetC (array index arg-expr)
                    (array-op array index
-                             (lambda (vals idx) (begin
-                                                  (array-set vals idx (recur arg-expr))
-                                                  (numV 0))))]))))
+                             (lambda (type-name vals idx) (local [(define arg-val (recur arg-expr))]
+                                                  (type-case Value arg-val
+                                                    [objV (class-name field-vals)
+                                                          (if (is-instance class-name type-name classes)
+                                                              (begin
+                                                                (array-set vals idx arg-val)
+                                                                (numV 0))
+                                                              (error 'interp "array type violation"))]
+                                                    [else (error 'interp "not an object")]))))]))))
 
 (define (init-array size init-val)
   (cond
@@ -291,7 +299,7 @@
     (classC
      'array-tester
      'object
-     (list (fieldC 'idx (numBT)) (fieldC 'val (numBT)))
+     (list (fieldC 'idx (numBT)) (fieldC 'val (arrBT (objBT))))
      (list (methodC 'test (if0C (arraysetC (argC) (getC (thisC) 'idx) (getC (thisC) 'val))
                                 (argC) ; same array, but val at position should be updated
                                 (nullC))))))
@@ -302,7 +310,7 @@
   (define arraytester (newC 'array-tester))
 
   (define (interp-posn a)
-    (interp a (list posn-class posn3D-class) (numV -1) (numV -1)))
+    (interp a (list posn-class posn3D-class arraysetC-test-class) (numV -1) (numV -1)))
 
   (define (interp-default a)
     (interp a (list) (numV -1) (numV -1))))
@@ -399,29 +407,32 @@
         (nullV))
 
   ; arrays...
-  (test (interp-default (newarrayC (numC 5) (numC 22)))
-        (arrV (list (box (numV 22)) (box (numV 22)) (box (numV 22)) (box (numV 22)) (box (numV 22)))))
-  (test (interp-posn (newarrayC (numC 2) posn27))
-        (arrV (list (box (objV 'posn (list (box (numV 2)) (box (numV 7))))) (box (objV 'posn (list (box (numV 2)) (box (numV 7))))))))
-  (test (interp-default (newarrayC (numC 0) (numC 1)))
-        (arrV (list)))
-  (test/exn (interp-default (newarrayC (numC -1) (numC 3)))
+  (test (interp-posn (newarrayC 'posn (numC 2) posn27))
+        (arrV 'posn (list (box (objV 'posn (list (box (numV 2)) (box (numV 7))))) (box (objV 'posn (list (box (numV 2)) (box (numV 7))))))))
+  (test (interp-posn (newarrayC 'posn (numC 0) posn27))
+        (arrV 'posn (list)))
+  (test/exn (interp-posn (newarrayC 'posn (numC -1) posn27))
             "negative size array")
-  (test/exn (interp-posn (newarrayC posn27 (numC 3)))
+  (test/exn (interp-posn (newarrayC 'posn posn27 (numC 3)))
             "not a number")
-  (test (interp-default (arrayrefC (newarrayC (numC 8) (numC -1)) (numC 5)))
-        (numV -1))
+  (test (interp-posn (arrayrefC (newarrayC 'posn (numC 8) posn27) (numC 5)))
+        (objV 'posn (list (box (numV 2)) (box (numV 7)))))
   (test/exn (interp-default (arrayrefC (numC 1) (numC 8)))
             "not an array")
-  (test/exn (interp-default (arrayrefC (newarrayC (numC 8) (numC -1)) (numC -1)))
+  (test/exn (interp-posn (arrayrefC (newarrayC 'posn (numC 8) posn27) (numC -1)))
             "index out of bounds")
-  (test/exn (interp-default (arrayrefC (newarrayC (numC 8) (numC -1)) (numC 8)))
+  (test/exn (interp-posn (arrayrefC (newarrayC 'posn (numC 8) posn27) (numC 8)))
             "index out of bounds")
-  (test/exn (interp-posn (arrayrefC (newarrayC (numC 8) (numC -1)) posn27))
+  (test/exn (interp-posn (arrayrefC (newarrayC 'posn (numC 8) posn27) posn27))
             "not a number")
-  (test (interp-default (arraysetC (newarrayC (numC 5) (numC 2)) (numC 3) (numC 4)))
+  (test (interp-posn (arraysetC (newarrayC 'posn (numC 5) posn27) (numC 3) posn27))
         (numV 0))
-  (test (interp (sendC (setC (setC arraytester 'idx (numC 2)) 'val (numC 7)) 'test (newarrayC (numC 5) (numC 2)))
-                (list arraysetC-test-class) (numV -1) (numV -1))
-        (arrV (list (box (numV 2)) (box (numV 2)) (box (numV 7)) (box (numV 2)) (box (numV 2))))))
+  (test (interp-posn (sendC (setC (setC arraytester 'idx (numC 1)) 'val (newC 'posn)) 'test (newarrayC 'posn (numC 3) posn27)))
+        (arrV 'posn (list (box (objV 'posn (list (box (numV 2)) (box (numV 7)))))
+                          (box (objV 'posn (list (box (numV 0)) (box (numV 0)))))
+                          (box (objV 'posn (list (box (numV 2)) (box (numV 7))))))))
+  (test/exn (interp-posn (arraysetC (newarrayC 'posn (numC 5) posn27) (numC 3) (numC 2)))
+            "not an object")
+  (test/exn (interp-posn (arraysetC (newarrayC 'posn3D (numC 5) posn531) (numC 3) posn27))
+            "array type violation"))
                       

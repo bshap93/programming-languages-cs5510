@@ -159,7 +159,7 @@
       [numV (n) (number->s-exp n)]
       [objV (class-name field-vals) `object]
       [nullV () `null]
-      [arrV (vals) `array])))
+      [arrV (type-name vals) `array])))
 
 (module+ test
   (test (interp-prog

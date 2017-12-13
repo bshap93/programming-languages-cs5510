@@ -87,7 +87,8 @@
                   (recur els))]
       [nullI () (nullC)]
       [newarrayI (type-name size init-expr)
-                 (newarrayC (recur size)
+                 (newarrayC type-name
+                            (recur size)
                             (recur init-expr))]
       [arrayrefI (array index)
                  (arrayrefC (recur array)
@@ -125,7 +126,7 @@
   (test (expr-i->c (nullI) 'object)
         (nullC))
   (test (expr-i->c (newarrayI 'sometype (numI 5) (numI 2)) 'object)
-        (newarrayC (numC 5) (numC 2)))
+        (newarrayC 'sometype (numC 5) (numC 2)))
   (test (expr-i->c (arrayrefI (numI 0) (numI 2)) 'object)
         (arrayrefC (numC 0) (numC 2)))
   (test (expr-i->c (arraysetI (numI 0) (numI 2) (numI 3)) 'object)
