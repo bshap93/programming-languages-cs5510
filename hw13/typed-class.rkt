@@ -22,6 +22,7 @@
 (define-type Type
   [numT]
   [objT (class-name : symbol)]
+  [arrT (el-type : Type)]
   [unsetT]
   [nullT]) ; necessary distinction from unsetT -- this and arg must be prohibited in main expression
 
@@ -139,7 +140,13 @@
                       (type-case Type (recur r)
                         [numT () (numT)]
                         [else (type-error r "num")])]
-                [else (type-error l "num")]))]
+                [else (type-error l "num")]))
+            (define (array-op array index func)
+              (type-case Type (recur index)
+                [numT () (type-case Type (recur array)
+                           [arrT (el-type) (func el-type)]
+                           [else (type-error array "array")])]
+                [else (type-error index "num")]))]
       (type-case ExprI expr
         [numI (n) (numT)]
         [plusI (l r) (typecheck-nums l r)]
@@ -182,7 +189,7 @@
                                   t-classes))]
         [castI (type-name arg-expr)
                (local [(define arg-type (recur arg-expr))
-                       (define sym-type (if (equal? type-name 'num) (numT) (objT type-name)))]
+                       (define sym-type (objT type-name))]
                  (if (or (is-subtype? arg-type sym-type t-classes)
                          (is-subtype? sym-type arg-type t-classes))
                      sym-type
@@ -191,7 +198,23 @@
               (type-case Type (recur tst)
                 [numT () (least-upper-bound (recur thn) (recur els) t-classes)]
                 [else (type-error tst "num")])]
-        [nullI () (nullT)]))))
+        [nullI () (nullT)]
+        [newarrayI (type-name size init-expr)
+                   (type-case Type (recur size)
+                     [numT () (local [(define init-type (recur init-expr))
+                                      (define el-type (objT type-name))]
+                                (if (is-subtype? init-type el-type t-classes)
+                                    (arrT el-type)
+                                    (type-error init-type (to-string el-type))))]
+                     [else (type-error size "num")])]
+        [arrayrefI (array index)
+                   (array-op array index
+                             (lambda (el-type) el-type))]
+        [arraysetI (array index arg-expr)
+                   (array-op array index
+                             (lambda (el-type) (if (is-subtype? (recur arg-expr) el-type t-classes)
+                                                   (numT)
+                                                   (type-error arg-expr (to-string el-type)))))]))))
 
 (define (get-obj-field-type obj-expr t-obj field-name t-classes)
   (type-case Type t-obj
@@ -415,8 +438,8 @@
         (objT 'object))
   (test (typecheck-posn (castI 'posn3D posn27))
         (objT 'posn3D))
-  (test (typecheck (castI 'num (numI 1)) (list))
-        (numT))
+  (test/exn (typecheck (castI 'num (numI 1)) (list))
+            "impossible cast") ; built-in num is different then from a num class
   (test/exn (typecheck-posn (castI 'posn square-posn27))
             "impossible cast")
   (test/exn (typecheck (castI 'object (numI 1)) (list))
@@ -464,7 +487,29 @@
   (test (typecheck-posn (setI (newI 'square) 'topleft posn531))
         (objT 'square))
   (test/exn (typecheck-posn (setI (newI 'square) 'other posn27))
-            "field type mismatch"))
+            "field type mismatch")
+
+  ; Test array operations
+  (test (typecheck-posn (newarrayI 'posn (numI 5) posn531))
+        (arrT (objT 'posn)))
+  (test/exn (typecheck-posn (newarrayI 'posn posn27 posn27))
+            "no type")
+  (test/exn (typecheck-posn (newarrayI 'posn3D (numI 5) posn27))
+            "no type")
+  (test (typecheck-posn (arrayrefI (newarrayI 'posn (numI 5) posn27) (numI 2)))
+        (objT 'posn))
+  (test/exn (typecheck-posn (arrayrefI (newarrayI 'posn (numI 5) posn27) posn27))
+            "no type")
+  (test/exn (typecheck-posn (arrayrefI (numI 2) (numI 3)))
+            "no type")
+  (test (typecheck-posn (arraysetI (newarrayI 'posn3D (numI 0) posn531) (numI 0) posn531))
+        (numT))
+  (test/exn (typecheck-posn (arraysetI (newarrayI 'posn3D (numI 0) posn531) posn27 posn531))
+            "no type")
+  (test/exn (typecheck-posn (arraysetI (numI 0) (numI 0) posn27))
+            "no type")
+  (test/exn (typecheck-posn (arraysetI (newarrayI 'posn3D (numI 5) posn531) (numI 0) posn27))
+            "no type"))
 
 ;; ----------------------------------------
 

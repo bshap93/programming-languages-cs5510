@@ -76,6 +76,17 @@
     (if0I (parse (second (s-exp->list s)))
           (parse (third (s-exp->list s)))
           (parse (fourth (s-exp->list s))))]
+   [(s-exp-match? '{newarray SYMBOL ANY ANY} s)
+    (newarrayI (s-exp->symbol (second (s-exp->list s)))
+               (parse (third (s-exp->list s)))
+               (parse (fourth (s-exp->list s))))]
+   [(s-exp-match? '{arrayref ANY ANY} s)
+    (arrayrefI (parse (second (s-exp->list s)))
+               (parse (third (s-exp->list s))))]
+   [(s-exp-match? '{arrayset ANY ANY ANY} s)
+    (arraysetI (parse (second (s-exp->list s)))
+               (parse (third (s-exp->list s)))
+               (parse (fourth (s-exp->list s))))]
    [else (error 'parse "invalid input")]))
 
 (module+ test
@@ -105,6 +116,12 @@
         (if0I (numI 0) (numI 1) (numI 2)))
   (test (parse `null)
         (nullI))
+  (test (parse '{newarray sometype 5 2})
+        (newarrayI 'sometype (numI 5) (numI 2)))
+  (test (parse '{arrayref {newarray sometype 5 2} 2})
+        (arrayrefI (newarrayI 'sometype (numI 5) (numI 2)) (numI 2)))
+  (test (parse '{arrayset {newarray sometype 5 2} 2 3})
+        (arraysetI (newarrayI 'sometype (numI 5) (numI 2)) (numI 2) (numI 3)))
   (test/exn (parse `x)
             "invalid input")
 
@@ -141,7 +158,8 @@
     (type-case Value v
       [numV (n) (number->s-exp n)]
       [objV (class-name field-vals) `object]
-      [nullV () `null])))
+      [nullV () `null]
+      [arrV (vals) `array])))
 
 (module+ test
   (test (interp-prog
@@ -178,5 +196,16 @@
          '{if0 {+ {send {cast posn {set {set {new posn} x 2} y 7}} mdist null} -9}
                null
                1})
-        `null))
+        `null)
+
+  (test (interp-prog
+         (list
+          '{class posn extends object
+                 {[x : num] [y : num]}
+                 {mdist {+ {get this x} {get this y}}}
+                 {addDist {+ {send arg mdist 0}
+                             {send this mdist 0}}}})
+
+         '{newarray posn 5 {set {new posn} x 2}})
+        `array))
 

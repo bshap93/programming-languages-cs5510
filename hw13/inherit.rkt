@@ -29,7 +29,15 @@
   [if0I (tst : ExprI)
         (thn : ExprI)
         (els : ExprI)]
-  [nullI])
+  [nullI]
+  [newarrayI (type-name : symbol)
+             (size : ExprI)
+             (init-expr : ExprI)]
+  [arrayrefI (array : ExprI)
+             (index : ExprI)]
+  [arraysetI (array : ExprI)
+             (index : ExprI)
+             (arg-expr : ExprI)])
 
 (define-type ClassI
   [classI (name : symbol)
@@ -77,7 +85,17 @@
             (if0C (recur tst)
                   (recur thn)
                   (recur els))]
-      [nullI () (nullC)])))
+      [nullI () (nullC)]
+      [newarrayI (type-name size init-expr)
+                 (newarrayC (recur size)
+                            (recur init-expr))]
+      [arrayrefI (array index)
+                 (arrayrefC (recur array)
+                            (recur index))]
+      [arraysetI (array index arg-expr)
+                 (arraysetC (recur array)
+                            (recur index)
+                            (recur arg-expr))])))
 
 (module+ test
   (test (expr-i->c (numI 10) 'object)
@@ -105,7 +123,13 @@
   (test (expr-i->c (if0I (numI 0) (numI 1) (numI 2)) 'object)
         (if0C (numC 0) (numC 1) (numC 2)))
   (test (expr-i->c (nullI) 'object)
-        (nullC)))
+        (nullC))
+  (test (expr-i->c (newarrayI 'sometype (numI 5) (numI 2)) 'object)
+        (newarrayC (numC 5) (numC 2)))
+  (test (expr-i->c (arrayrefI (numI 0) (numI 2)) 'object)
+        (arrayrefC (numC 0) (numC 2)))
+  (test (expr-i->c (arraysetI (numI 0) (numI 2) (numI 3)) 'object)
+        (arraysetC (numC 0) (numC 2) (numC 3))))
 
 ;; ----------------------------------------
 

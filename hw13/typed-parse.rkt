@@ -39,17 +39,29 @@
 
 (define (parse-type [s : s-expression]) : Type
   (cond
-   [(s-exp-match? `num s)
-    (numT)]
-   [(s-exp-match? `SYMBOL s)
-    (objT (s-exp->symbol s))]
-   [else (error 'parse-type "invalid input")]))
+    [(s-exp-match? `{arr ANY} s)
+     (arrT (parse-obj-type (second (s-exp->list s))))]
+    [(s-exp-match? `num s)
+     (numT)]
+    [(s-exp-match? `SYMBOL s)
+     (objT (s-exp->symbol s))]
+    [else (error 'parse-type "invalid input")]))
+
+(define (parse-obj-type [s : s-expression]) : Type
+  (cond
+    [(s-exp-match? `SYMBOL s)
+     (objT (s-exp->symbol s))]
+    [else (error 'parse-type "invalid input")]))
 
 (module+ test
   (test (parse-type `num)
         (numT))
   (test (parse-type `object)
         (objT 'object))
+  (test (parse-type `{arr num})
+        (arrT (objT 'num))) ; num class shadows built-in num -- object arrays only
+  (test/exn (parse-type `{arr {arr {arr object}}})
+            "invalid input") ; nesting not allowed
   (test/exn (parse-type `{})
             "invalid input")
   
@@ -83,7 +95,8 @@
     (type-case Value v
       [numV (n) (number->s-exp n)]
       [objV (class-name field-vals) `object]
-      [nullV () `null])))
+      [nullV () `null]
+      [arrV (vals) `array])))
 
 (module+ test
   (test (interp-t-prog
@@ -133,4 +146,18 @@
          '{if0 {+ {send {cast posn {set {set {set {new posn3D} x 5} y 3} z 1}} mdist null} -9}
                null
                {set {set {new posn} x 2} y 2}})
-        `null))
+        `null)
+
+  (test (interp-t-prog
+         (list
+          '{class posn extends object
+                 {[x : num]
+                  [y : num]}
+                 {mdist : num -> num
+                        {+ {get this x} {get this y}}}
+                 {addDist : posn -> num
+                          {+ {send arg mdist 0}
+                             {send this mdist 0}}}})
+         
+         '{newarray posn 5 {set {new posn} x 5}})
+         `array))
